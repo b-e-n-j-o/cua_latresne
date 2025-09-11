@@ -1,0 +1,429 @@
+{
+  "public.b_assiette_de_servitude_d_utilite_publique": {
+    "name": "Servitudes d'utilité publique - Assiette",
+    "keep": [
+      "suptype",
+      "fichier",
+      "typeass",
+      "nomsuplitt"
+    ],
+    "geom": "geom",
+    "coverage_by": ["suptype"]
+  },
+  "public.b_classement_sonore_des_infrastr_5ddfbdd18c6b": {
+    "name": "Classement sonore des infrastructures",
+    "keep": [
+      "cls_id",
+      "nature",
+      "cat_bruit",
+      "larg_secte"
+    ],
+    "geom": "geom",
+    "coverage_by": ["cat_bruit"]
+  },
+  "public.b_communes_impactees_par_une_can_29cd6b21512a": {
+    "name": "Canalisation de transport de matières dangereuses",
+    "keep": [
+      "code_insee",
+      "nom_com",
+      "url_fichie"
+    ],
+    "geom": "geom"
+  },
+  "public.b_conservatoire_du_littoral": {
+    "name": "Conservatoire du littoral",
+    "keep": [
+      "nom",
+      "url"
+    ],
+    "geom": "geom"
+  },
+  "public.b_delimitation_parcellaire_aoc_viticole": {
+    "name": "Parcelles AOC viticole",
+    "keep": [
+      "id",
+      "denom"
+    ],
+    "geom": "geom",
+    "coverage_by": ["denom"]
+  },
+  "public.b_emprises_des_carrieres_souterr_71fe2d990d58": {
+    "name": "Carrières et cavités souterraines",
+    "keep": [
+      "gml_id",
+      "numero_cavite_georisques",
+      "nom_cavite",
+      "profondeur_minimum_m",
+      "profondeur_maximum_m",
+      "nbre_etages"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom_cavite"]
+  },
+  "public.b_galerie_cheminement_et_pilier": {
+    "name": "Galerie cheminement et pilier",
+    "keep": [
+      "gml_id",
+      "niveau_carriere"
+    ],
+    "geom": "geom"
+  },
+  "public.b_generateur_de_servitude_d_utilite_publique": {
+    "name": "Servitudes d'utilité publique - Générateur",
+    "keep": [
+      "suptype",
+      "partition",
+      "fichier",
+      "typegen",
+      "srcgeogen",
+      "type",
+      "nomsuplitt"
+    ],
+    "geom": "geom",
+    "coverage_by": ["suptype"]
+  },
+  "public.b_habillages_lineaires": {
+    "name": "Habillages linéaires",
+    "keep": [
+      "partition",
+      "nattrac",
+      "lib_idhab"
+    ],
+    "geom": "geom"
+  },
+  "public.b_habillages_ponctuels": {
+    "name": "Habillages ponctuels",
+    "keep": [
+      "id",
+      "partition",
+      "nattrac",
+      "lib_idhab"
+    ],
+    "geom": "geom"
+  },
+  "public.b_haies": {
+    "name": "Haies",
+    "keep": [
+      "id",
+      "cleabs"
+    ],
+    "geom": "geom"
+  },
+  "public.b_infos_surfaciques_et_zones_de_preemptions": {
+    "name": "Infos surfaciques et zones de préemptions",
+    "keep": [
+      "id",
+      "libelle",
+      "txt",
+      "typeinf",
+      "nomfic",
+      "idurba",
+      "stypeinf"
+    ],
+    "geom": "geom",
+    "coverage_by": ["libelle"]
+  },
+  "public.b_patrimoine_naturel": {
+    "name": "Patrimoine naturel",
+    "keep": [
+      "src_table",
+      "sitename",
+      "nom"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.b_perimetres_de_protection_de_re_02300774ccbf": {
+    "name": "Périmètres de protection des marais de Bruges",
+    "keep": [
+      "id",
+      "nom"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.b_plan_d_exposition_au_bruit__peb_": {
+    "name": "Plan d'exposition au bruit (PEB)",
+    "keep": [
+      "id",
+      "zone",
+      "indldenext",
+      "indldenint",
+      "code_oaci",
+      "nom",
+      "date_arret",
+      "producteur",
+      "ref_doc"
+    ],
+    "geom": "geom",
+    "coverage_by": ["zone"]
+  },
+  "public.b_plan_de_servitudes_aeronautiques": {
+    "name": "Plan de servitudes aéronautiques",
+    "keep": [
+      "id",
+      "oaci",
+      "nom",
+      "arrete_psa"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.b_prescriptions_lineaires": {
+    "name": "Prescriptions linéaires",
+    "keep": [
+      "gid",
+      "libelle",
+      "typepsc",
+      "stypepsc"
+    ],
+    "geom": "geom",
+    "coverage_by": ["libelle"]
+  },
+  "public.b_prescriptions_ponctuelles": {
+    "name": "Prescriptions ponctuelles",
+    "keep": [
+      "gid",
+      "libelle",
+      "txt",
+      "typepsc",
+      "stypepsc"
+    ],
+    "geom": "geom"
+  },
+  "public.b_prescriptions_surfaciques": {
+    "name": "Prescriptions surfaciques",
+    "keep": [
+      "libelle",
+      "txt",
+      "typepsc",
+      "stypepsc"
+    ],
+    "geom": "geom",
+    "coverage_by": ["libelle"]
+  },
+  "public.b_protection_des_zones_humides_e_eb11df1f2e2f": {
+    "name": "Protection des zones humides et des tourbières BCAE 2",
+    "keep": [
+      "type_zone"
+    ],
+    "geom": "geom",
+    "coverage_by": ["type_zone"]
+  },
+  "public.b_ramsar___zone_humide_d_importa_98d777debe00": {
+    "name": "RAMSAR - zone humide d'importance internationale",
+    "keep": [
+      "nom_site"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom_site"]
+  },
+  "public.b_secteur_de_carriere_souterrain_a00df0ece082": {
+    "name": "Secteur de carrière souterraine comblée ou déroctée",
+    "keep": [
+      "gml_id",
+      "type_comblement",
+      "commentaires_cd33",
+      "nom_cavite_proposition_cd33"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom_cavite_proposition_cd33"]
+  },
+  "public.b_secteurs_de_la_carte_communale": {
+    "name": "Secteurs de la carte communale",
+    "keep": [
+      "libelle",
+      "libelong",
+      "typesect",
+      "nomfic"
+    ],
+    "geom": "geom",
+    "coverage_by": ["libelong"]
+  },
+  "public.b_site_et_territoires_d_exceptio_4ef0691900a2": {
+    "name": "Site et territoires d'exception",
+    "keep": [
+      "nomsuplitt",
+      "type_site_id",
+      "code",
+      "libelle"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nomsuplitt"]
+  },
+  "public.b_zaenr_sur_le_departement_de_la_dd5af0216051": {
+    "name": "ZAENR sur le département de la Gironde",
+    "keep": [
+      "uid",
+      "filiere",
+      "nom_com"
+    ],
+    "geom": "geom",
+    "coverage_by": ["filiere"]
+  },
+  "public.b_zonage_plu": {
+    "name": "Zonage PLU",
+    "keep": [
+      "libelle",
+      "libelong",
+      "typezone"
+    ],
+    "geom": "geom",
+    "coverage_by": ["libelong"]
+  },
+  "public.b_zones_de_mouvements_de_terrain_carrieres": {
+    "name": "Zones de mouvements de terrain - Carrières",
+    "keep": [
+      "gml_id",
+      "type_de_risque"
+    ],
+    "geom": "geom",
+    "coverage_by": ["type_de_risque"]
+  },
+  "public.b_zr_pprt_et_pacs": {
+    "name": "Zones reglementées des PPRN Mouvement de terrain et porter à connaissance",
+    "keep": [
+      "src_table",
+      "src_family",
+      "codezone",
+      "typereg",
+      "nom",
+      "nomfic"
+    ],
+    "geom": "geom",
+    "coverage_by": ["codezone"]
+  },
+  "public.installationsclassees": {
+    "name": "Installations classées",
+    "keep": [
+      "nom_ets",
+      "adresse",
+      "lib_naf",
+      "seveso",
+      "lib_seveso",
+      "bovins",
+      "porcs",
+      "volailles",
+      "carriere",
+      "eolienne",
+      "industrie",
+      "ied",
+      "priorite_n",
+      "url_fiche"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom_ets"]
+  },
+  "public.l_cote_seuil_ppri_s_033": {
+    "name": "Cotes de seuil PPRI",
+    "keep": [
+      "id_zone",
+      "nom",
+      "codezone",
+      "typereg",
+      "soumisalea",
+      "commune"
+    ],
+    "geom": "geom",
+    "coverage_by": ["codezone"]
+  },
+  "public.dgs_carteaux": {
+    "name": "Zones de captage d'eau",
+    "keep": [
+      "code_pp",
+      "source",
+      "projet",
+      "ins_pro__1"
+    ],
+    "geom": "geom",
+    "coverage_by": ["source"]
+  },
+  "public.irsn_radon_metropole": {
+    "name": "IRSN - Radon métropole",
+    "keep": [
+      "NOM_COMM",
+      "CLASSE_POT"
+    ],
+    "geom": "geom",
+    "coverage_by": ["CLASSE_POT"]
+  },
+  "public.n_zone_reg_ppri_033": {
+    "name": "Zones reglementées PPRI Gironde détaillé",
+    "keep": [
+      "codezone",
+      "typereg",
+      "soumisalea"
+    ],
+    "geom": "geom",
+    "coverage_by": ["codezone"]
+  },
+  "public.n_zone_reg_pprif_d33": {
+    "name": "Zones reglementées PPRIF Gironde - Feux de forêts",
+    "keep": [
+      "nom",
+      "codezone",
+      "typereg"
+    ],
+    "geom": "geom",
+    "coverage_by": ["codezone"]
+  },
+  "public.n_zone_reg_pprl_d33": {
+    "name": "Zones reglementées PPRL Gironde - Littoraux",
+    "keep": [
+      "nom",
+      "typereg",
+      "soumisalea",
+      "urlfic"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.n_zone_reg_pprsm_d33": {
+    "name": "Zones reglementées PPRSM Gironde - Submersion",
+    "keep": [
+      "nom",
+      "typereg",
+      "soumisalea"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.n_zone_reg_pprmt_033": {
+    "name": "Zones reglementées PPRMT Gironde - Mouvement de terrain",
+    "keep": [
+      "nom",
+      "codezone",
+      "typereg",
+      "soumisalea",
+      "urlfic"
+    ],
+    "geom": "geom",
+    "coverage_by": ["nom"]
+  },
+  "public.nuisances_sonores_gironde": {
+    "name": "Nuisances sonores Gironde",
+    "keep": [
+      "nom_tronc",
+      "debutant",
+      "finissant",
+      "communes",
+      "cat_bruit",
+      "larg_secte"
+    ],
+    "geom": "geom",
+    "coverage_by": ["cat_bruit"]
+  },
+  "public.bruit_ferrees_et_lgv_buffers": {
+    "keep": [
+      "source",
+      "lidebssseg",
+      "lifinssseg",
+      "cat_bruit",
+      "larg_secte",
+      "nature",
+      "toponyme"
+    ],
+    "geom": "geom",
+    "coverage_by": ["cat_bruit"]
+  }
+}

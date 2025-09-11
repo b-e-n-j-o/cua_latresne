@@ -1,0 +1,26 @@
+cat > .gitignore <<'EOF'
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+keralia_venv/
+
+# Artefacts locaux
+output/
+cerfa_pages_out/
+*.log
+
+# OS/éditeurs
+.DS_Store
+
+# Secrets
+.env
+
+# ⚠️ NE PAS ignorer les .json / .csv car on en a besoin dans l'image
+# (donc pas de règle *.json ou *.csv ici)
+EOF

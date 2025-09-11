@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: kerelia-cua
+    env: docker
+    plan: starter           # ou plus selon charge
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: output
+      mountPath: /app/output
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: ENABLE_CORS
+        value: "1"
+      - key: MAPPING_JSON_PATH
+        value: /app/mapping_layers.json
+      - key: COMMUNES_CSV_PATH
+        value: /app/v_commune_2025.csv
+      # Ces 3 là se règlent comme SECRETS dans le dashboard (ne pas committer)
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: API_AUTH_TOKEN
+        sync: false

@@ -1,0 +1,30 @@
+# OS cruft (macOS)
+.DS_Store
+._*
+.AppleDouble
+.Spotlight*
+.Trashes
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv
+venv/
+.venv/
+keralia_venv/
+
+# Sorties locales
+output/
+cerfa_pages_out/
+*.html
+*.md
+*.docx
+
+# Git
+.git
+.gitignore
+
+# Secrets locaux
+.env

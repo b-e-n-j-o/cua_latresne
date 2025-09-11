@@ -1,0 +1,21 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic>=2
+requests
+sqlalchemy>=2.0
+psycopg2-binary
+pandas
+python-dotenv
+
+# Vision + PDF
+pdf2image
+Pillow
+
+# Géométrie + carte (si tu gardes la carte)
+shapely>=2
+pyproj
+folium
+
+# OpenAI
+openai
