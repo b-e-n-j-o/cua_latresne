@@ -1,14 +1,18 @@
 # report_from_json.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import json, argparse, logging, re
+import json, argparse, logging, re, os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from llm_utils import call_gpt5_text  # wrapper existant
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("report_from_json_text")
+
+# ===================== Config par défaut (overridable CLI) ===================== #
+DEFAULT_PLU_REG_TABLE = os.getenv("PLU_REG_TABLE", "plu_chunks")
+DEFAULT_PLU_REG_COLUMN = os.getenv("PLU_REG_COLUMN", "zonage")
 
 
 # ------------------------- Helpers numériques ------------------------- #
@@ -86,11 +90,174 @@ def _compact_payload(data: Dict[str, Any], max_values_per_attr: int = 8, max_sur
     return d
 
 
+# ------------------------ Détection des zones PLU ---------------------- #
+def _is_like(name: str, *needles: str) -> bool:
+    n = (name or "").lower()
+    return any(k in n for k in needles)
+
+def _find_plu_layers(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Repère les couches de zonage PLU, tolérant des variantes de nommage.
+    """
+    out = []
+    for lyr in results:
+        t = (lyr.get("table") or "")
+        if _is_like(t, "zonage_plu", "zone_urba", "wfs_du:zone_urba", "b_zonage_plu"):
+            out.append(lyr)
+    return out
+
+def _first_val(d: Dict[str, Any], keys: List[str]) -> Optional[str]:
+    vals = d.get("values", {})
+    for k in keys:
+        arr = vals.get(k) or vals.get(k.upper())
+        if isinstance(arr, list) and arr:
+            v = arr[0]
+            if v is not None:
+                return str(v).strip()
+    return None
+
+def _pct_from_layer(lyr: Dict[str, Any]) -> Optional[float]:
+    st = lyr.get("surface_totals") or {}
+    pct = st.get("parcel_pct_total")
+    return float(pct) if isinstance(pct, (int, float)) else None
+
+def _extract_plu_zones_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Retourne une liste de zones issues des couches PLU trouvées.
+    Chaque zone: {"libelle": str|None, "typezone": str|None, "pct": float|None}
+    """
+    rep = (payload.get("reports") or [{}])[0]
+    results = rep.get("results") or []
+    layers = _find_plu_layers(results)
+    zones: List[Dict[str, Any]] = []
+
+    for lyr in layers:
+        z = {
+            "libelle": _first_val(lyr, ["libelle", "LIBELLE"]),
+            "typezone": _first_val(lyr, ["typezone", "TYPEZONE", "zone", "ZONE"]),
+            "pct": _pct_from_layer(lyr),
+        }
+        # ne duplique pas si déjà présent
+        if any((z.get("libelle") and z["libelle"] == e.get("libelle")) or
+               (z.get("typezone") and z["typezone"] == e.get("typezone")) for e in zones):
+            continue
+        zones.append(z)
+
+    # Trie par pourcentage décroissant si disponible
+    zones.sort(key=lambda x: (x["pct"] is not None, x.get("pct") or 0.0), reverse=True)
+    return zones
+
+
+# ------------------ Inférence de codes + fetch règlement ------------------ #
+_CAND_RE = re.compile(r"\b(\d+AU|AU[A-Z]?|U[A-Z]?|N[A-Z]?|A[A-Z]?)\b", re.IGNORECASE)
+
+def _cand_for_zone(z: str) -> List[str]:
+    """
+    Génère des codes candidats déterministes à partir d'un libellé ou d’un code.
+    (logique alignée avec fetch_plu_regulation.py)
+    """
+    z = (z or "").strip().upper()
+    if not z:
+        return []
+
+    # Si le libellé contient déjà un code plausible (ex: "Zone AUc", "Secteur UA")
+    m = _CAND_RE.findall(z)
+    if m:
+        # privilégie le premier match explicite
+        primary = m[0].upper()
+        # Normalise variantes AUc -> AU ; ajoute 1AU comme candidate prioritaire
+        if primary.startswith("AU"):
+            return ["1AU", "AU", "2AU", "3AU"]
+        return [primary]
+
+    # Si on nous donne directement "AUc"/"AUb"…
+    if z.startswith("AU") and len(z) >= 2:
+        return ["1AU", "AU", "2AU", "3AU"]
+
+    # 1AU / 2AU / 3AU…
+    m2 = re.match(r"^(\d+)AU$", z)
+    if m2:
+        n = m2.group(1)
+        if n == "1":
+            return ["1AU", "AU"]
+        elif n == "2":
+            return ["2AU", "AU", "1AU"]
+        else:
+            return [f"{n}AU", "AU", "1AU"]
+
+    # UA / UB / UC / N / A…
+    return [z]
+
+def _infer_zone_codes(libelle: Optional[str], typezone: Optional[str]) -> List[str]:
+    """
+    Produit une petite liste de codes candidats à partir de typezone prioritaire puis libellé.
+    """
+    cand: List[str] = []
+    if typezone:
+        cand.extend(_cand_for_zone(typezone))
+    if libelle:
+        # évite les doublons, conserve ordre
+        for c in _cand_for_zone(libelle):
+            if c not in cand:
+                cand.append(c)
+    return cand[:6]  # bornage sécurité
+
+def _fetch_plu_regulation_for_zones(
+    zones: List[Dict[str, Any]],
+    table: str,
+    column: str,
+    max_chars_total: int = 12000,
+) -> str:
+    """
+    Pour chaque zone, tente de récupérer un texte de règlement via fetch_plu_regulation().
+    Concatène avec un en-tête par zone. Coupe globalement à max_chars_total.
+    """
+    if not zones:
+        return ""
+
+    try:
+        from fetch_plu_regulation import fetch_plu_regulation as _fetch
+    except Exception as e:
+        log.warning(f"⚠️ Module fetch_plu_regulation introuvable/inimportable: {e}")
+        return ""
+
+    parts: List[str] = []
+    used = 0
+
+    for z in zones:
+        codes = _infer_zone_codes(z.get("libelle"), z.get("typezone"))
+        pct = z.get("pct")
+        pretty_pct = f" ({_fmt_pct(pct)})" if isinstance(pct, (int, float)) else ""
+
+        got_txt = ""
+        for c in codes:
+            txt = _fetch(c, table=table, column=column)
+            if txt and not txt.startswith(("❌", "ℹ️")):
+                got_txt = txt.strip()
+                heading = f"=== {c}{pretty_pct} ==="
+                block = f"{heading}\n{got_txt}".strip()
+                # coupe si besoin
+                if used + len(block) > max_chars_total:
+                    block = block[: max(0, max_chars_total - used)]
+                parts.append(block)
+                used += len(block)
+                break  # on s'arrête au premier code concluant
+
+        if used >= max_chars_total:
+            break
+
+    final = "\n\n".join([p for p in parts if p])
+    log.info(f"📚 Règlement PLU injecté: {len(final)} caractères")
+    return final
+
+
 # ----------------------------- Prompt LLM ----------------------------- #
-def _build_prompt_text(compact_json: Dict[str, Any]) -> str:
+def _build_prompt_text(compact_json: Dict[str, Any], plu_reg_text: str = "") -> str:
     """
     Objectif : produire un rapport PARAGRAPHIQUE (pas de Markdown),
     en français, avec consolidation PPRI / PLU / Nuisances / Radon, chiffres (m², %) et sans doublons.
+    Si 'plu_reg_text' est fourni, l'assistant peut s'y référer STRICTEMENT pour
+    enrichir la partie PLU (extraits neutres). Ne rien inventer si vide.
     """
     style = """Tu es un assistant spécialisé en urbanisme réglementaire.
 Transforme STRICTEMENT le JSON fourni en un rapport textuel clair, professionnel et concis.
@@ -103,12 +270,16 @@ Contraintes de sortie :
 - Évite les doublons : si plusieurs couches PPRI couvrent 100 % (assiette/générateur/prescription), fusionne en un seul constat.
 - Évite de citer les noms techniques de tables ; privilégie des libellés métiers.
 
+Si un TEXTE DE RÈGLEMENT PLU est fourni ci-dessous, tu peux l'utiliser pour rédiger des extraits neutres
+dans la section Urbanisme (PLU) : cite uniquement ce qui figure dans ce texte, de façon factuelle.
+S'il est absent, n'invente rien et reste descriptif.
+
 Structure attendue :
 1) En-tête : commune (INSEE), parcelle (section-numéro) et surface estimée si présente.
 2) Résumé exécutif : 3 à 6 phrases qui donnent l'essentiel.
 3) Développement par thématiques (si présentes) :
    - PPRI / inondation : consolider assiette/générateur/prescription ; détailler la répartition par zones (ex: Rouge urbanisé, Bleu) avec m² et % cumulés.
-   - Urbanisme (PLU) : zonage de la parcelle (ex: zone N), avec couverture.
+   - Urbanisme (PLU) : zonage de la parcelle (ex: zone N), avec couverture. Si du règlement est fourni, ajoute des extraits neutres strictement issus de ce texte.
    - Nuisances sonores routières : tronçon concerné, catégorie de bruit, couverture.
    - Radon : classe de potentiel.
    - Autres éléments significatifs s'il y en a.
@@ -116,9 +287,10 @@ Structure attendue :
 
 Rappels :
 - N'évoque jamais une thématique absente du JSON.
-- Si la répartition par zones est disponible (ex: n_zone_reg_ppri_033 avec codezone), affiche la couverture de chaque zone.
+- Si la répartition par zones PPRI est disponible, affiche la couverture de chaque zone.
 - Ne colle pas les identifiants internes (id, fid, ctid...)."""
 
+    # Exemple exact repris de ta version précédente (inchangé)
     example = """Rapport d’analyse parcellaire – Latresne (INSEE 33234)
 
 Parcelle concernée : AC 0496
@@ -165,6 +337,8 @@ Niveau de risque radon faible (pas de contrainte majeure)."""
         + example
         + "\n\nDONNÉES JSON (à transformer en rapport) :\n"
         + json.dumps(compact_json, ensure_ascii=False)
+        + "\n\nTEXTE DE RÈGLEMENT PLU (extraits, par zone — si vide, ignorer) :\n"
+        + (plu_reg_text.strip() or "(aucun)")
     )
 
 
@@ -175,10 +349,10 @@ def _find_layer(results: List[Dict[str, Any]], table: str) -> Optional[Dict[str,
             return l
     return None
 
-def _deterministic_text(payload: Dict[str, Any]) -> str:
+def _deterministic_text(payload: Dict[str, Any], plu_reg_text: str = "") -> str:
     """
     Texte lisible si l'appel LLM échoue.
-    Regroupe l'essentiel : PPRI (avec répartition), PLU, Nuisances, Radon, synthèse.
+    Ajoute en fin d'Urbanisme un bloc "Extraits du règlement (si dispo)".
     """
     ctx = payload.get("context", {})
     commune = ctx.get("commune") or "?"
@@ -205,7 +379,12 @@ def _deterministic_text(payload: Dict[str, Any]) -> str:
     l_cotes   = _find_layer(results, "l_cote_seuil_ppri_s_033")
 
     # PLU
-    plu = _find_layer(results, "b_zonage_plu")
+    plu = None
+    # tolérant : on prend la 1ère couche détectée comme PLU
+    for lyr in results:
+        if _is_like(lyr.get("table") or "", "zonage_plu", "zone_urba"):
+            plu = lyr
+            break
 
     # Nuisances
     bruit = _find_layer(results, "nuisances_sonores_gironde")
@@ -233,7 +412,6 @@ def _deterministic_text(payload: Dict[str, Any]) -> str:
     if any([ppri_zone, ppri_ass, ppri_gen, psc_surf, l_cotes]):
         out.append("")
         p = []
-        # couverture globale issue des totaux si dispo
         cov_glob = None
         for lyr in [ppri_ass, ppri_gen, psc_surf, ppri_zone, l_cotes]:
             if lyr and isinstance(lyr.get("surface_totals"), dict):
@@ -241,45 +419,10 @@ def _deterministic_text(payload: Dict[str, Any]) -> str:
                 if isinstance(pct, (int, float)) and pct >= 99.5:
                     cov_glob = "100.0 %"
                     break
-
         if cov_glob:
             p.append("La parcelle est entièrement comprise dans le périmètre réglementé du PPRI.")
         else:
             p.append("La parcelle est partiellement soumise au périmètre PPRI.")
-
-        # répartition des zones (si disponible)
-        if ppri_zone and isinstance(ppri_zone.get("surfaces"), list):
-            # sommer par codezone si besoin
-            by_zone: Dict[str, float] = {}
-            for s in ppri_zone["surfaces"]:
-                a = s.get("inter_area_m2") or 0.0
-                # essaye d'utiliser 'codezone' dans values si présent
-                # ici, on retombe sur les valeurs distinctes disponibles
-            vals = ppri_zone.get("values", {})
-            zones = vals.get("codezone") or []
-            # Si on a deux surfaces, on prend l'ordre décroissant pour associer aux valeurs
-            surfs_sorted = sorted(
-                [s for s in ppri_zone["surfaces"] if isinstance(s.get("inter_area_m2"), (int, float))],
-                key=lambda s: s["inter_area_m2"],
-                reverse=True
-            )
-            # Texte indicatif : on affiche les surfaces telles que calculées
-            parts = []
-            for s in surfs_sorted[:3]:
-                pct = _fmt_pct(s.get("pct_of_parcel"))
-                area = _fmt_m2(s.get("inter_area_m2"))
-                parts.append(f"{area} ({pct})")
-            if parts:
-                p.append("Répartition PPRI sur la parcelle : " + " ; ".join(parts) + ".")
-
-        # cotes de seuil si présentes
-        if l_cotes and l_cotes.get("values"):
-            c = l_cotes["values"]
-            codes = c.get("codezone") or []
-            if codes:
-                uniq = ", ".join(sorted(set(codes)))
-                p.append(f"Cotes de seuil présentes : {uniq}.")
-
         out.append(" ".join(p))
 
     # Urbanisme – PLU
@@ -290,6 +433,14 @@ def _deterministic_text(payload: Dict[str, Any]) -> str:
         tot = plu.get("surface_totals", {}).get("parcel_pct_total")
         cov = f" ({_fmt_pct(tot)})" if isinstance(tot, (int, float)) else ""
         out.append(f"Zonage PLU : la parcelle est classée en zone {zone}{cov}.")
+        # Extraits règlement si dispo
+        if plu_reg_text.strip():
+            # on ne met qu'un court rappel indicatif (le texte complet est dans le prompt LLM d'habitude)
+            preview = plu_reg_text.strip().splitlines()
+            preview = "\n".join(preview[: min(12, len(preview))])
+            out.append("")
+            out.append("Extraits du règlement PLU (indicatif) :")
+            out.append(preview)
 
     # Nuisances sonores
     if bruit:
@@ -317,22 +468,50 @@ def _deterministic_text(payload: Dict[str, Any]) -> str:
 
 
 # ------------------------- Génération du rapport ------------------------ #
-def generate_text_report(payload: Dict[str, Any]) -> str:
+def generate_text_report(
+    payload: Dict[str, Any],
+    enable_plu_reg: bool = True,
+    plu_reg_table: str = DEFAULT_PLU_REG_TABLE,
+    plu_reg_column: str = DEFAULT_PLU_REG_COLUMN,
+) -> str:
+    # 1) Compact JSON (surfaces, totaux…)
     compact = _compact_payload(payload, max_values_per_attr=8, max_surfaces=60)
-    prompt = _build_prompt_text(compact)
-    # LLM en haute qualité
+
+    # 2) Règlement PLU (optionnel)
+    plu_reg_text = ""
+    if enable_plu_reg:
+        try:
+            zones = _extract_plu_zones_from_payload(compact)
+            plu_reg_text = _fetch_plu_regulation_for_zones(
+                zones=zones,
+                table=plu_reg_table,
+                column=plu_reg_column,
+                max_chars_total=12000,
+            )
+        except Exception as e:
+            log.warning(f"⚠️ Impossible d'injecter le règlement PLU: {e}")
+            plu_reg_text = ""
+
+    # 3) Prompt LLM avec règlement (si dispo)
+    prompt = _build_prompt_text(compact, plu_reg_text=plu_reg_text)
+
+    # 4) LLM en qualité "moyenne" (comme avant)
     res = call_gpt5_text(prompt, reasoning_effort="medium", verbosity="medium")
     if res.get("success") and res.get("response"):
         return res["response"].strip() + "\n"
-    # Fallback déterministe
-    return _deterministic_text(_add_surface_totals(payload))
+
+    # 5) Fallback déterministe enrichi d’un aperçu règlement si dispo
+    return _deterministic_text(_add_surface_totals(payload), plu_reg_text=plu_reg_text)
 
 
 # --------------------------------- CLI --------------------------------- #
 def main():
-    ap = argparse.ArgumentParser(description="Génère un rapport texte depuis un JSON d'intersections.")
+    ap = argparse.ArgumentParser(description="Génère un rapport texte depuis un JSON d'intersections (avec règlement PLU optionnel).")
     ap.add_argument("--json", required=True, help="Chemin du rapport JSON (quick_intersections.json ou autre)")
     ap.add_argument("--out", default="rapport_cua.txt", help="Chemin de sortie .txt")
+    ap.add_argument("--no-plu-reg", action="store_true", help="Désactive l'injection du règlement PLU")
+    ap.add_argument("--plu-reg-table", default=DEFAULT_PLU_REG_TABLE, help="Table Supabase des extraits de règlement (def: plu_chunks)")
+    ap.add_argument("--plu-reg-column", default=DEFAULT_PLU_REG_COLUMN, help="Nom de colonne du code de zone (def: zonage)")
     args = ap.parse_args()
 
     jpath = Path(args.json)
@@ -340,7 +519,12 @@ def main():
         raise SystemExit(f"JSON introuvable: {jpath}")
 
     data = json.loads(jpath.read_text(encoding="utf-8"))
-    txt = generate_text_report(data)
+    txt = generate_text_report(
+        data,
+        enable_plu_reg=(not args.no_plu_reg),
+        plu_reg_table=args.plu_reg_table,
+        plu_reg_column=args.plu_reg_column,
+    )
 
     out_txt = Path(args.out)
     out_txt.write_text(txt, encoding="utf-8")

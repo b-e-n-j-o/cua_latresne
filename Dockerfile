@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Code et modules
-COPY app.py cua_service.py intersections_parcelle.py report_from_json.py enclaves.py cerfa_vision_pipeline.py llm_utils.py ./
+COPY app.py cua_service.py intersections_parcelle.py report_from_json.py enclaves.py cerfa_vision_pipeline.py llm_utils.py fetch_plu_regulation.py ./
 
 # Ressources (à la racine du repo)
 COPY mapping_layers.json v_commune_2025.csv ./
