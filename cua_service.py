@@ -51,6 +51,13 @@ try:
 except Exception:
     Document = None
 
+# Génération CUA DOCX (gabarit structuré)
+try:
+    from cua_docx import build_cumodel as _build_cumodel, generate_docx_llm as _gen_cua_docx
+    _CUA_DOCX_OK = True
+except Exception as e:
+    _CUA_DOCX_OK = False
+
 # ==== CNIG styles (minimaux, étends si besoin) ====
 styles_config = {
     "public.b_zonage_plu": {
@@ -609,6 +616,29 @@ def _write_docx(text: str, path: Path) -> bool:
     doc.save(path)
     return True
 
+def _meta_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = result.get("context", {})
+    commune = ctx.get("commune") or ""
+    insee = ctx.get("insee") or ""
+    # première parcelle
+    parc = (ctx.get("parcelles") or [{}])[0]
+    label = f"{parc.get('section','')} {parc.get('numero','')}".strip()
+    return {
+        "departement": os.getenv("DEFAULT_DEPARTEMENT", ""),   # optionnel (ou renseigne via couche 'departement')
+        "commune": commune,
+        "insee": insee,
+        "adresse": os.getenv("DEFAULT_ADRESSE", ""),           # si tu as l'adresse ailleurs, remplace
+        "references_cadastrales": label,
+        "parcelle": label,
+        "demandeur": os.getenv("DEFAULT_DEMANDEUR", ""),
+        "date_demande": os.getenv("DEFAULT_DATE_DEMANDE", ""),
+        "date_arrete": os.getenv("DEFAULT_DATE_ARRETE", ""),
+        "numero_arrete": os.getenv("DEFAULT_NUMERO_ARRETE", ""),
+        "plu_nom": os.getenv("DEFAULT_PLU_NOM", f"PLU de {commune}"),
+        "plu_date_appro": os.getenv("DEFAULT_PLU_DATE", ""),
+        # tu peux aussi pousser des articles_* si tu veux forcer des valeurs
+    }
+
 
 
 # ========================= Blocs métiers ========================= #
@@ -829,6 +859,21 @@ def run_cua_from_pdf(
         except Exception as e:
             payload["map_error"] = f"carte BBOX échouée: {e}"
 
+    # --- CUA DOCX gabarit (optionnel) ---
+    cua_docx_url = None
+    try:
+        if _CUA_DOCX_OK:
+            meta = _meta_from_result(result)
+            cumodel = _build_cumodel(result, meta)  # << utilise le JSON d'intersections
+            docx_name = f"CUA_{result['context']['insee']}_{(result['reports'][0].get('parcel') or {}).get('label','PARCELLE').replace(' ','')}.docx"
+            docx_path = OUTPUT_DIR / docx_name
+            _gen_cua_docx(cumodel, str(docx_path))
+            cua_docx_url = f"/files/{docx_name}"
+    except Exception as e:
+        log.exception(f"Generation CUA.docx échouée: {e}")
+
+    payload["cua_docx_url"] = cua_docx_url
+
     return payload
 
 def run_cua_direct(
@@ -936,6 +981,19 @@ def run_cua_direct(
         except Exception as e:
             log.exception(f"Generation carte BBOX échouée: {e}")
 
+    # --- CUA DOCX gabarit (optionnel) ---
+    cua_docx_url = None
+    try:
+        if _CUA_DOCX_OK:
+            meta = _meta_from_result(result)
+            cumodel = _build_cumodel(result, meta)  # << utilise le JSON d'intersections
+            docx_name = f"CUA_{insee_tag}_{label_slug}.docx"
+            docx_path = OUTPUT_DIR / docx_name
+            _gen_cua_docx(cumodel, str(docx_path))
+            cua_docx_url = f"/files/{docx_name}"
+    except Exception as e:
+        log.exception(f"Generation CUA.docx échouée: {e}")
+
     return {
         "ok": True,
         "result": result,
@@ -943,6 +1001,7 @@ def run_cua_direct(
             "result_json_url": result_json_url,
             "report_markdown_url": report_md_url,
             "report_docx_url": report_docx_url,
+            "cua_docx_url": cua_docx_url,          # <<<<
             "map_html_url": map_html_url,
         }.items() if v}
     }
