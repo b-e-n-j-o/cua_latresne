@@ -33,9 +33,7 @@ def get_supabase_client() -> Client:
 
 def upload_artifact(bucket_name: str, file_path: Path, job_id: str) -> Optional[str]:
     """
-    Téléverse un fichier local dans un bucket Supabase.
-    Le fichier est organisé dans un dossier virtuel basé sur l'ID du job.
-    Retourne l'URL publique du fichier ou None en cas d'échec.
+    Téléverse un fichier local dans un bucket Supabase avec Content-Type correct.
     """
     client = get_supabase_client()
     if not client:
@@ -43,17 +41,40 @@ def upload_artifact(bucket_name: str, file_path: Path, job_id: str) -> Optional[
 
     file_name_in_bucket = f"jobs/{job_id}/{file_path.name}"
 
+    # --- Détection du type MIME ---
+    import mimetypes
+    ext = file_path.suffix.lower()
+
+    manual_map = {
+        ".html": "text/html",
+        ".htm": "text/html",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".pdf": "application/pdf",
+        ".json": "application/json",
+        ".csv": "text/csv",
+    }
+
+    mime_type = manual_map.get(ext)
+    if not mime_type:
+        mime_type, _ = mimetypes.guess_type(file_path)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
     try:
         with open(file_path, 'rb') as f:
             data = f.read()
 
-        # Téléversement du fichier
-        res = client.storage.from_(bucket_name).upload(file_name_in_bucket, data)
-        
-        # Obtention de l'URL publique
+        # Upload avec Content-Type explicite
+        res = client.storage.from_(bucket_name).upload(
+            file_name_in_bucket,
+            data,
+            {"content-type": mime_type}
+        )
+
+        # URL publique
         public_url = client.storage.from_(bucket_name).get_public_url(file_name_in_bucket)
-        log.info(f"Fichier '{file_path.name}' téléversé: {public_url}")
+        log.info(f"✅ Fichier '{file_path.name}' téléversé ({mime_type}) → {public_url}")
         return public_url
     except Exception as e:
-        log.error(f"Échec du téléversement de '{file_path.name}': {e}")
+        log.error(f"❌ Échec upload '{file_path.name}': {e}")
         return None
