@@ -129,6 +129,67 @@ def call_gpt5_text(prompt: str, reasoning_effort: str = "medium", verbosity: str
             "error": str(e)
         }
 
+def call_gpt5_nano(prompt: str,
+                   reasoning_effort: str = "medium",
+                   verbosity: str = "medium") -> Dict[str, Any]:
+    """
+    Appel de l'API GPT-5 Nano (modèle: gpt-5-nano-2025-08-07)
+    Retourne un dict avec success, response, raw_response et tokens.
+    """
+    logger.info(f"📝 Appel API GPT-5 Nano - Texte uniquement "
+                f"(reasoning: {reasoning_effort}, verbosity: {verbosity})")
+
+    try:
+        if not os.getenv("OPENAI_API_KEY"):
+            return {"success": False,
+                    "error": "OPENAI_API_KEY manquant dans l'environnement"}
+
+        response = client.responses.create(
+            model="gpt-5-nano-2025-08-07",
+            input=[{"role": "user", "content": prompt}],
+            reasoning={"effort": reasoning_effort},
+            text={"verbosity": verbosity}
+        )
+
+        output_text = extract_text_from_response(response)
+
+        if not output_text:
+            return {
+                "success": False,
+                "error": "Réponse reçue mais texte non extractible",
+                "raw_response": str(response)
+            }
+
+        # Stats tokens
+        usage = getattr(response, "usage", None)
+        token_stats = {}
+        if usage:
+            token_stats = {
+                "input_tokens": getattr(usage, "input_tokens", None),
+                "output_tokens": getattr(usage, "output_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
+            if hasattr(usage, "output_tokens_details"):
+                token_stats["reasoning_tokens"] = getattr(
+                    usage.output_tokens_details, "reasoning_tokens", None
+                )
+
+            logger.info(f"💰 Tokens GPT-5 Nano utilisés: {token_stats}")
+
+        logger.info(f"✅ Réponse reçue ({len(output_text)} caractères)")
+
+        return {
+            "success": True,
+            "response": output_text,
+            "raw_response": response,
+            "tokens": token_stats
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'appel GPT-5 Nano: {e}")
+        return {"success": False, "error": str(e)}
+
+
 def call_gpt4o_text(prompt: str, max_tokens: int = 20000) -> Dict[str, Any]:
     """
     Fallback vers GPT-4o si GPT-5 n'est pas disponible.
@@ -310,6 +371,66 @@ def call_gpt5_json(prompt: str, temperature: float = 0.1) -> Dict[str, Any]:
             "success": False, 
             "error": str(e)
         }
+
+def call_gpt5_image(image_path: str, prompt: str,
+                    reasoning_effort: str = "medium",
+                    verbosity: str = "medium") -> Dict[str, Any]:
+    """
+    Appel API GPT-5 avec une image et du texte
+    
+    Args:
+        image_path (str): Chemin vers l'image
+        prompt (str): Le prompt textuel
+        reasoning_effort (str): Niveau d'effort de raisonnement ("minimal", "low", "medium", "high")
+        verbosity (str): Niveau de verbosité ("low", "medium", "high")
+    
+    Returns:
+        Dict: Résultat de l'appel API avec response, raw_response et tokens
+    """
+    if not os.path.exists(image_path):
+        return {"success": False, "error": f"Image not found: {image_path}"}
+
+    try:
+        # Encodage image
+        with open(image_path, "rb") as f:
+            b64_img = base64.b64encode(f.read()).decode("utf-8")
+        img_uri = f"data:image/png;base64,{b64_img}"
+
+        # Appel API
+        response = client.responses.create(
+            model="gpt-5",
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": img_uri, "detail": "high"}
+                ]
+            }],
+            reasoning={"effort": reasoning_effort},
+            text={"verbosity": verbosity},
+            temperature=0
+        )
+
+        # Texte de sortie
+        output_text = response.output_text or str(response)
+
+        # Stats de tokens
+        usage = getattr(response, "usage", None)
+        token_stats = {
+            "input_tokens": usage.input_tokens if usage else None,
+            "output_tokens": usage.output_tokens if usage else None,
+            "total_tokens": usage.total_tokens if usage else None,
+        }
+
+        return {
+            "success": True,
+            "response": output_text,
+            "raw_response": response,
+            "tokens": token_stats
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def call_gpt4o_vision(image_bytes: bytes, prompt: str = "Extrait le texte brut lisible de ce document. Ne renvoie que le texte, sans ajout.", temperature: float = 0.0) -> Dict[str, Any]:
     """

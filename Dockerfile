@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Dépendances Python
 COPY requirements.txt .
-# ⚠️ Ajoute explicitement les paquets indispensables si pas déjà listés
+# ⚠️ pip install supplémentaire uniquement si pas déjà listés
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir \
        python-docx \
@@ -21,20 +21,34 @@ RUN pip install --no-cache-dir -r requirements.txt \
        shapely \
        pyproj
 
-# Code et modules
-COPY app.py cua_service.py intersections_parcelle.py report_from_json.py enclaves.py cerfa_vision_pipeline.py llm_utils.py fetch_plu_regulation.py plu_regulation_context.py cua_docx.py ./
+# -------------------------------
+# 📦 Copie du code et des ressources
+# -------------------------------
+COPY app.py /app/
+COPY cua_orchestrator.py /app/
+COPY path_setup.py /app/
+COPY CONFIG/ /app/CONFIG/
+COPY CUA_GENERATION/ /app/CUA_GENERATION/
+COPY INTERSECTIONS/ /app/INTERSECTIONS/
+COPY MAP_GENERATION/ /app/MAP_GENERATION/
+COPY PIPELINE_VISION/ /app/PIPELINE_VISION/
+COPY UTILS/ /app/UTILS/
+COPY templates/ /app/templates/
 
-# Ressources (à la racine du repo)
-COPY mapping_layers.json v_commune_2025.csv ./
+# ⚠️ supprime les .pyc/__pycache__ pour éviter d’embarquer du bruit
+RUN find /app -type d -name "__pycache__" -exec rm -rf {} +
 
 # Dossier de sorties
 RUN mkdir -p /app/output
 
-# Variables d'env par défaut (tu peux les override au run)
+# Variables d'env par défaut (override au run)
 ENV PORT=8080 \
-    MAPPING_JSON_PATH=/app/mapping_layers.json \
-    COMMUNES_CSV_PATH=/app/v_commune_2025.csv \
-    ENABLE_CORS=1
+    MAPPING_JSON_PATH=/app/CONFIG/mapping_layers.json \
+    COMMUNES_CSV_PATH=/app/CONFIG/v_commune_2025.csv \
+    ENABLE_CORS=1 \
+    PYTHONPATH=/app
 
 EXPOSE 8080
+
+# Point d'entrée : app.py avec uvicorn (FastAPI ou Starlette présumé)
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

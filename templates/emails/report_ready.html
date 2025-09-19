@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8"/>
+    <title>Rapport CUA disponible</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  </head>
+  <body style="margin:0;padding:0;background:#F6FAF8;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1F2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F6FAF8;padding:24px 0;">
+      <tr>
+        <td>
+          <table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
+            <tr>
+              <td style="background:#78B7A6;padding:12px 20px;color:#fff;font-weight:600;font-size:16px;">
+                Mairie de Latresne — Auto CUA
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px;">
+                <p>Bonjour,</p>
+                <p>Le dossier CUA a été traité avec succès.</p>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:16px 0;">
+                  <tr>
+                    <td style="padding:4px 0;">Parcelle :</td>
+                    <td style="padding:4px 0;"><strong>{{ parcel_label or "-" }}</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;">INSEE :</td>
+                    <td style="padding:4px 0;"><strong>{{ insee or "-" }}</strong></td>
+                  </tr>
+                </table>
+
+                <p style="margin:16px 0 8px;">Ressources :</p>
+                <ul style="margin:0 0 16px 18px;padding:0;">
+                  {% if report_docx_url %}
+                  <li><a href="{{ report_docx_url }}" target="_blank" style="color:#2E6E62;">Télécharger le rapport (DOCX)</a></li>
+                  {% elif report_markdown_url %}
+                  <li><a href="{{ report_markdown_url }}" target="_blank" style="color:#2E6E62;">Ouvrir le rapport (Markdown)</a></li>
+                  {% else %}
+                  <li>Rapport : <em>non disponible</em></li>
+                  {% endif %}
+                  {% if map_html_url %}
+                  <li><a href="{{ map_html_url }}" target="_blank" style="color:#2E6E62;">Ouvrir la carte (HTML)</a></li>
+                  {% else %}
+                  <li>Carte : <em>non disponible</em></li>
+                  {% endif %}
+                </ul>
+
+                {% if portal_url %}
+                <p><a href="{{ portal_url }}" target="_blank" style="display:inline-block;background:#2E6E62;color:white;padding:10px 14px;border-radius:999px;text-decoration:none;">Ouvrir le portail</a></p>
+                {% endif %}
+
+                <p style="color:#6B7280;font-size:12px;margin-top:24px;">— Service automatisé CUA</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#F9FAFB;color:#6B7280;font-size:11px;padding:12px 20px;text-align:center;">
+                Vous recevez cet e-mail car vous avez été désigné comme destinataire d’une notification CUA.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

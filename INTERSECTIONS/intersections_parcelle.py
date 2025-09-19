@@ -11,7 +11,7 @@ Intersections PARCELLE (IGN) → Supabase/PostGIS (whitelist d'attributs)
 Dépendances: sqlalchemy, psycopg2-binary, python-dotenv, pandas, requests
 """
 
-import os, json, argparse, logging
+import os, json, argparse, logging, time
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urlparse, quote_plus
 from dotenv import load_dotenv
@@ -22,9 +22,17 @@ import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
+
+def _ms(t0: float) -> float:
+    return (time.perf_counter() - t0) * 1000.0
 
 # ADD en haut des imports
-from enclaves import detect_and_carve_enclaves  # nouveau module
+from .enclaves import detect_and_carve_enclaves  # nouveau module
 
 # ======================= Constantes =======================
 IGN_WFS = "https://data.geopf.fr/wfs/ows"
@@ -188,90 +196,71 @@ def locate_parcel_feature(insee_code: str, section: str, numero4: str, timeout: 
     return feats[0] if feats else {}
 
 # ======================= SQL (intersections avec PARCELLE) =======================
-# COMPTE les entités qui intersectent la parcelle
+# COMPTE les entités qui intersectent la parcelle (optimisé index GiST)
 COUNT_SQL_PARCEL = """
 SET LOCAL statement_timeout = '30s';
-WITH parcel_4326 AS (
-  SELECT ST_UnaryUnion(
-           ST_CollectionExtract(
-             ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
-             3
-           )
+WITH p AS (
+  SELECT ST_Transform(
+           ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
+           2154
          ) AS g
-),
-p2154 AS (
-  SELECT ST_Transform(g, 2154) AS g FROM parcel_4326
 )
 SELECT COUNT(*)::bigint
-FROM {qname} t, p2154 p
-WHERE {geom} IS NOT NULL
-  AND ST_Intersects(
-        ST_Transform({geom}, 2154),
-        p.g
-      );
+FROM {qname} t, p
+WHERE t.geom_2154 IS NOT NULL
+  AND t.geom_2154 && ST_Envelope(p.g)
+  AND ST_Intersects(t.geom_2154, p.g);
 """
 
-# VALEURS DISTINCTES des attributs "utiles"
+# VALEURS DISTINCTES des attributs "utiles" (optimisé index GiST)
 VALUES_SQL_PARCEL = """
 SET LOCAL statement_timeout = '30s';
-WITH parcel_4326 AS (
-  SELECT ST_UnaryUnion(
-           ST_CollectionExtract(
-             ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
-             3
-           )
+WITH p AS (
+  SELECT ST_Transform(
+           ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
+           2154
          ) AS g
-),
-p2154 AS (
-  SELECT ST_Transform(g, 2154) AS g FROM parcel_4326
 )
 SELECT DISTINCT ({col_sql}::text) AS v
-FROM {qname} t, p2154 p
-WHERE {geom} IS NOT NULL
+FROM {qname} t, p
+WHERE t.geom_2154 IS NOT NULL
   AND {col_sql} IS NOT NULL
-  AND ST_Intersects(
-        ST_Transform({geom}, 2154),
-        p.g
-      )
+  AND t.geom_2154 && ST_Envelope(p.g)
+  AND ST_Intersects(t.geom_2154, p.g)
 LIMIT :lim;
 """
 
-# SURFACES d’intersection par entité (et surface de la parcelle)
+# SURFACES d’intersection par entité (et surface de la parcelle) — optimisé
 AREA_SQL_PARCEL = """
 SET LOCAL statement_timeout = '30s';
-WITH parcel_4326 AS (
-  SELECT ST_UnaryUnion(
-           ST_CollectionExtract(
-             ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
-             3
-           )
+WITH p AS (
+  SELECT ST_Transform(
+           ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326),
+           2154
          ) AS g
-),
-p2154 AS (
-  SELECT ST_Transform(g, 2154) AS g FROM parcel_4326
 )
 SELECT
   {col_sql} AS id,
   ST_Area(
     ST_CollectionExtract(
-      ST_Intersection(
-        ST_Transform({geom}, 2154),
-        p.g
-      ), 3
+      ST_Intersection(t.geom_2154, p.g), 3
     )
   ) AS inter_area_m2,
   ST_Area(p.g) AS parcel_area_m2
-FROM {qname} t, p2154 p
-WHERE {geom} IS NOT NULL
-  AND ST_Intersects(
-        ST_Transform({geom}, 2154),
-        p.g
-      );
+FROM {qname} t, p
+WHERE t.geom_2154 IS NOT NULL
+  AND t.geom_2154 && ST_Envelope(p.g)
+  AND ST_Intersects(t.geom_2154, p.g);
 """
 
 
 def _intersect_one_parcel(*, eng, layers, parcel_feature, carve_enclaves: bool, enclave_buffer_m: float, values_limit: int):
     # 1) géométrie JSON pour SQL
+    props = parcel_feature.get("properties") or {}
+    section = props.get("section", "??")
+    numero  = props.get("numero", "????")
+    label = f"{section} {numero}"
+    logger.info("🔎 Parcelle %s — enclaves=%s", label, "ON" if carve_enclaves else "OFF")
     if carve_enclaves:
         info = detect_and_carve_enclaves(parcel_feature, buffer_m=float(enclave_buffer_m))
         gj = info["host_corrected_geojson_4326"]
@@ -300,129 +289,139 @@ def _intersect_one_parcel(*, eng, layers, parcel_feature, carve_enclaves: bool, 
     hit_count = 0
 
     for lyr in layers:
-        schema, table, geom_col = lyr["schema"], lyr["table"], lyr["geom_col"]
-        keep_effective = [c for c in lyr.get("keep", []) if c in set(list_existing_columns(eng, schema, table))]
+        schema, table = lyr["schema"], lyr["table"]
         qname = qident(schema, table)
-        geom_sql = f't."{geom_col}"'
+        layer_tag = f"{schema}.{table}"
 
-        # count
-        with eng.begin() as con:
-            n = int(con.execute(
-                text(COUNT_SQL_PARCEL.format(qname=qname, geom=geom_sql)),
-                {"gj": parcel_geom_json}
-            ).scalar() or 0)
-        if n <= 0:
-            continue
-        hit_count += 1
+        # 👉 utilisation de la colonne métrique indexée
+        geom_sql = 't."geom_2154"'
+        keep_effective = [c for c in lyr.get("keep", []) if c in set(list_existing_columns(eng, schema, table))]
 
-        vals_map = {}
-        for col in keep_effective:
-            col_sql = f't."{col}"'  # <-- IMPORTANT : identifiant cité
+        t_layer = time.perf_counter()
+        logger.info("→ Couche %s (geom=geom_2154)", layer_tag)
+
+        try:
+            # COUNT
+            t0 = time.perf_counter()
+            with eng.begin() as con:
+                n = int(con.execute(
+                    text(COUNT_SQL_PARCEL.format(qname=qname)),
+                    {"gj": parcel_geom_json}
+                ).scalar() or 0)
+            logger.info("   COUNT: %d (%.1f ms)", n, _ms(t0))
+            if n <= 0:
+                logger.info("   ✖ Aucun intersect — skip (%.1f ms total)", _ms(t_layer))
+                continue
+
+            # VALUES (whitelist)
+            t0 = time.perf_counter()
+            vals_map = {}
+            total_vals = 0
+            for col in keep_effective:
+                col_sql = f't."{col}"'
+                with eng.begin() as con:
+                    rows = con.execute(
+                        text(VALUES_SQL_PARCEL.format(qname=qname, col_sql=col_sql)),
+                        {"gj": parcel_geom_json, "lim": int(values_limit)}
+                    ).all()
+                vals = [r[0] for r in rows if r[0] is not None]
+                vals_map[col] = vals
+                total_vals += len(vals)
+            logger.info("   VALUES: %d colonnes, %d valeurs (%.1f ms)", len(keep_effective), total_vals, _ms(t0))
+
+            # AREA (surfaces par entité)
+            parcel_area_m2 = None
+            surfaces = []
+            id_col = lyr.get("id_col", "id")
+            existing_cols = set(list_existing_columns(eng, schema, table))
+            if id_col in existing_cols:
+                id_sql = f't."{id_col}"'
+            else:
+                id_sql = 'ROW_NUMBER() OVER()::text'
+                logger.warning("   ⚠ Colonne '%s' absente dans %s, usage ROW_NUMBER()", id_col, layer_tag)
+
+            t0 = time.perf_counter()
             with eng.begin() as con:
                 rows = con.execute(
-                    text(VALUES_SQL_PARCEL.format(qname=qname, geom=geom_sql, col_sql=col_sql)),
-                    {"gj": parcel_geom_json, "lim": int(values_limit)}
-                ).all()
-            vals_map[col] = [r[0] for r in rows if r[0] is not None]
-
-        # Calcul des surfaces d'intersection
-        parcel_area_m2 = None
-        surfaces = []
-        id_col = lyr.get("id_col", "id")  # optionnel: configurable via mapping.json
-        
-        # Vérifier si la colonne d'identifiant existe, sinon utiliser ROW_NUMBER()
-        existing_cols = set(list_existing_columns(eng, schema, table))
-        if id_col in existing_cols:
-            id_sql = f't."{id_col}"'
-        else:
-            # Fallback: utiliser ROW_NUMBER() si pas de colonne id
-            id_sql = 'ROW_NUMBER() OVER()::text'
-            logger.warning(f"⚠️ Colonne '{id_col}' absente dans {schema}.{table}, utilisation de ROW_NUMBER()")
-
-        with eng.begin() as con:
-            rows = con.execute(
-                text(AREA_SQL_PARCEL.format(qname=qname, geom=geom_sql, col_sql=id_sql)),
-                {"gj": parcel_geom_json}
-            ).mappings().all()
-
-        for r in rows:
-            if parcel_area_m2 is None:
-                parcel_area_m2 = float(r["parcel_area_m2"] or 0)
-            inter_area = float(r["inter_area_m2"] or 0)
-            if inter_area > 0:
-                surfaces.append({
-                    "id": r["id"],
-                    "inter_area_m2": inter_area,
-                    "pct_of_parcel": inter_area / parcel_area_m2 * 100 if parcel_area_m2 else None
-                })
-
-        # Calcul de couverture par attribut
-        coverage_results = {}
-        for cov_col in lyr.get("coverage_by", []):
-            with eng.begin() as con:
-                q = f"""
-                SET LOCAL statement_timeout = '30s';
-                WITH parcel AS (
-                  SELECT ST_Transform(
-                    ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326), 2154
-                  ) AS g
-                ),
-                agg AS (
-                  SELECT
-                    t."{cov_col}"::text AS v,
-                    SUM(
-                      ST_Area(
-                        ST_CollectionExtract(
-                          ST_Intersection(
-                            ST_Transform(t."{geom_col}", 2154),
-                            p.g
-                          ), 3
-                        )
-                      )
-                    ) AS inter_area_m2
-                  FROM {qident(schema, table)} t
-                  CROSS JOIN parcel p
-                  WHERE t."{geom_col}" IS NOT NULL
-                    AND t."{cov_col}" IS NOT NULL
-                    AND ST_Intersects(
-                          ST_Transform(t."{geom_col}", 2154),
-                          p.g
-                        )
-                  GROUP BY t."{cov_col}"
-                )
-                SELECT v, inter_area_m2
-                FROM agg
-                WHERE inter_area_m2 > 0
-                ORDER BY inter_area_m2 DESC
-                """
-                rows = con.execute(text(q), {"gj": parcel_geom_json}).mappings().all()
-
-            cov_list = []
+                    text(AREA_SQL_PARCEL.format(qname=qname, col_sql=id_sql)),
+                    {"gj": parcel_geom_json}
+                ).mappings().all()
             for r in rows:
+                if parcel_area_m2 is None:
+                    parcel_area_m2 = float(r["parcel_area_m2"] or 0)
                 inter_area = float(r["inter_area_m2"] or 0)
-                if inter_area > 0 and parcel_area_m2:
-                    cov_list.append({
-                        "value": r["v"],
+                if inter_area > 0:
+                    surfaces.append({
+                        "id": r["id"],
                         "inter_area_m2": inter_area,
-                        "pct_of_parcel": inter_area / parcel_area_m2 * 100
+                        "pct_of_parcel": inter_area / parcel_area_m2 * 100 if parcel_area_m2 else None
                     })
-            if cov_list:
-                coverage_results[cov_col] = cov_list
+            logger.info("   AREA: %d intersections, parcelle=%.1f m² (%.1f ms)", len(surfaces), parcel_area_m2 or 0.0, _ms(t0))
 
-        # ajoute ces surfaces dans le rapport
-        results_report.append({
-            "nom": table,
-            "schema": schema,
-            "table": table,
-            "geom_col": geom_col,
-            "srid": 4326,
-            "gkind": "geometry",
-            "count": n,
-            "values": vals_map,
-            "surfaces": surfaces,
-            "coverage": coverage_results,   # 👈 nouveau
-            "parcel_area_m2": parcel_area_m2
-        })
+            # COVERAGE (coverage_by)
+            coverage_results = {}
+            if lyr.get("coverage_by"):
+                for cov_col in lyr["coverage_by"]:
+                    t_cov = time.perf_counter()
+                    with eng.begin() as con:
+                        q = f"""
+                        SET LOCAL statement_timeout = '30s';
+                        WITH p AS (
+                          SELECT ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(:gj), 4326), 2154) AS g
+                        ),
+                        agg AS (
+                          SELECT t."{cov_col}"::text AS v,
+                                 SUM(ST_Area(ST_CollectionExtract(ST_Intersection(t.geom_2154, p.g), 3))) AS inter_area_m2
+                          FROM {qname} t, p
+                          WHERE t.geom_2154 IS NOT NULL
+                            AND t."{cov_col}" IS NOT NULL
+                            AND t.geom_2154 && ST_Envelope(p.g)
+                            AND ST_Intersects(t.geom_2154, p.g)
+                          GROUP BY t."{cov_col}"
+                        )
+                        SELECT v, inter_area_m2
+                        FROM agg
+                        WHERE inter_area_m2 > 0
+                        ORDER BY inter_area_m2 DESC
+                        """
+                        rows = con.execute(text(q), {"gj": parcel_geom_json}).mappings().all()
+
+                    cov_list = []
+                    for r in rows:
+                        inter_area = float(r["inter_area_m2"] or 0)
+                        if inter_area > 0 and parcel_area_m2:
+                            cov_list.append({
+                                "value": r["v"],
+                                "inter_area_m2": inter_area,
+                                "pct_of_parcel": inter_area / parcel_area_m2 * 100
+                            })
+                    coverage_results[cov_col] = cov_list
+                    logger.info("   COVERAGE[%s]: %d classes (%.1f ms)", cov_col, len(cov_list), _ms(t_cov))
+            else:
+                logger.info("   COVERAGE: —")
+
+            # assemble résultat
+            results_report.append({
+                "nom": table,
+                "schema": schema,
+                "table": table,
+                "geom_col": "geom_2154",
+                "srid": 2154,
+                "gkind": "geometry",
+                "count": n,
+                "values": vals_map,
+                "surfaces": surfaces,
+                "coverage": coverage_results,
+                "parcel_area_m2": parcel_area_m2
+            })
+
+            logger.info("   ✅ OK (%s) en %.1f ms", layer_tag, _ms(t_layer))
+
+            hit_count += 1
+
+        except Exception as e:
+            logger.exception("   ❌ ERREUR couche %s: %s", layer_tag, e)
+            continue
 
     # paquet final pour CETTE parcelle
     props = parcel_feature.get("properties") or {}
@@ -447,6 +446,10 @@ def run(args):
     insee = get_insee_from_csv(args.csv, args.commune.strip(), args.departement.strip())
     if not insee:
         raise RuntimeError("Impossible de déterminer un code INSEE unique.")
+    logger.info(
+        "INSEE résolu via CSV: commune='%s', departement='%s', insee='%s'",
+        args.commune.strip(), args.departement.strip(), insee
+    )
 
     # 2) Connexion / mapping
     eng = get_engine()
@@ -490,6 +493,37 @@ def run(args):
         print(f"✅ Rapport JSON écrit : {args.json_output}")
     else:
         print(json.dumps(out, ensure_ascii=False))
+
+
+def run_intersections(
+    commune: str,
+    departement: str,
+    parcels: str,
+    csv: str,
+    mapping: str,
+    out_json: str,
+    schema_whitelist: list[str] = ["public"],
+    values_limit: int = 100,
+    carve_enclaves: bool = True,
+    enclave_buffer_m: float = 120.0,
+) -> dict:
+    """Wrapper Python pour éviter argparse quand on importe en module."""
+    class Args:
+        pass
+    args = Args()
+    args.commune = commune
+    args.departement = departement
+    args.parcel = parcels
+    args.csv = csv
+    args.mapping = mapping
+    args.schema_whitelist = schema_whitelist
+    args.values_limit = values_limit
+    args.json_output = out_json
+    args.carve_enclaves = carve_enclaves
+    args.enclave_buffer_m = enclave_buffer_m
+
+    run(args)  # on appelle la vraie fonction run(args)
+    return json.load(open(out_json, encoding="utf-8"))
 
 # ======================= CLI =======================
 if __name__ == "__main__":
