@@ -124,3 +124,20 @@ def process_cua_direct(
     except Exception as e:
         log.error(f"Erreur dans l'endpoint /cua/direct: {e}")
         raise HTTPException(500, f"Erreur lors du traitement : {e}")
+
+from sqlalchemy import text as sql_text
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: int, _auth = Depends(api_key_guard)):
+    engine = _get_db_engine()
+    if not engine:
+        raise HTTPException(500, "DB not available")
+    with engine.begin() as con:
+        row = con.execute(sql_text("""
+            SELECT id, status, report_docx_path, map_html_path
+            FROM public.cua_jobs
+            WHERE id = :id
+        """), {"id": job_id}).mappings().first()
+        if not row:
+            raise HTTPException(404, "Job not found")
+        return dict(row)

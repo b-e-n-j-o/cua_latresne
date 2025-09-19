@@ -252,13 +252,6 @@ def build_cua_docx(
             line = " • Parcelle " + pnum + " : " + ", ".join([f"{v} ({pct_fr(p)} %)" for v, p in pairs])
             doc.add_paragraph(line)
 
-    # (IMPORTANT) On NE répète PAS le détail : la synthèse ci-dessus suffit et évite le doublon.
-    # Sources PPR
-    srcs = ppr.get("sources") or set()
-    if srcs:
-        doc.add_paragraph(f"Source PPRI (documents et découpages) : " + "; ".join(sorted(srcs)))
-
-    doc.add_paragraph("")  # grand saut de ligne entre sous-parties
 
     # ---- 5.2) RGA ----
     pr = doc.add_paragraph()

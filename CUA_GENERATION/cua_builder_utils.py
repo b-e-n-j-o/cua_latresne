@@ -472,7 +472,8 @@ def build_env_detail(inters: Dict[str, Any]) -> str:
     env_types = [
         "patrimoine_naturel", "nuisances_sonores", "radon",
         "installations_classees", "captage_eau", "sites_classes",
-        "protection_marais", "transport_matieres_dangereuses"
+        "protection_marais", "transport_matieres_dangereuses",
+        "argiles"
     ]
 
     env_layers = get_layers_by_type(inters, env_types)
