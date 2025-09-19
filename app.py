@@ -74,6 +74,7 @@ def process_cua(
     try:
         # Créer un répertoire temporaire unique pour ce job
         temp_dir = Path("temp") / str(uuid.uuid4())
+        temp_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = temp_dir / file.filename
         
         # Sauvegarder le fichier PDF
